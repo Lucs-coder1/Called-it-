@@ -147,6 +147,7 @@
 <script>
 const API_KEY = "a4186d53ffa648628bd8fc57444f66c7";
 const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby9ScixzSTUA5E3VWbuBr1uuufU1d-5nYb0zB-Bo5FQv-4mpqb6olmT-K0_T3fLt7P0Dw/exec";
+// URL unchanged from previous version — same deployment.
 
 const ASSETS = [
   {key:"BTC/EUR", name:"Bitcoin", sym:"BTC/EUR"},
@@ -248,15 +249,29 @@ function renderMenuBtn(){
 
 async function postAction(payload){
   try{
-    const res = await fetch(WEB_APP_URL, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"}, body: JSON.stringify(payload) });
-    return await res.text();
+    // mode:"no-cors" avoids the Apps Script CORS block. We don't read the
+    // response (it comes back opaque) — these are fire-and-forget writes.
+    await fetch(WEB_APP_URL, { method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body: JSON.stringify(payload) });
+    return true;
   }catch(e){ return null; }
 }
+
+function jsonp(url, params){
+  return new Promise((resolve, reject) => {
+    const cbName = "jsonp_cb_" + Math.random().toString(36).slice(2);
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => { cleanup(); reject(new Error("jsonp timeout")); }, 8000);
+    function cleanup(){ delete window[cbName]; script.remove(); clearTimeout(timeout); }
+    window[cbName] = (data) => { cleanup(); resolve(data); };
+    script.src = url + "?" + new URLSearchParams({...params, callback: cbName}).toString();
+    script.onerror = () => { cleanup(); reject(new Error("jsonp load error")); };
+    document.head.appendChild(script);
+  });
+}
 async function getAction(params){
-  try{
-    const res = await fetch(WEB_APP_URL + "?" + new URLSearchParams(params).toString());
-    return await res.json();
-  }catch(e){ return null; }
+  // Apps Script GET responses don't carry CORS headers reliably from a real
+  // external origin, so we fetch via JSONP (a <script> tag) instead of fetch().
+  try{ return await jsonp(WEB_APP_URL, params); }catch(e){ return null; }
 }
 
 function renderPhase(){
@@ -337,6 +352,7 @@ async function onEnterPhase(phase){
   }
   if (phase === 'waiting'){
     document.getElementById('chatMsgs').innerHTML = "";
+    knownChatKeys = new Set();
     chatPolledAt = 0;
     loadChat();
   }
@@ -377,13 +393,22 @@ async function doReveal(){
   }
 }
 
-let lastChatCount = 0;
+let knownChatKeys = new Set();
+function chatKey(m){ return m.timestamp + "|" + m.nickname + "|" + m.message; }
+
 async function loadChat(){
   const data = await getAction({action:"chat", round: currentCycle});
   const msgs = Array.isArray(data) ? data : [];
   const box = document.getElementById('chatMsgs');
   if (!box) return;
-  box.innerHTML = msgs.map(m => `<div class="chat-msg"><span class="nick">${m.nickname}</span>${m.message}</div>`).join("");
+  // Merge: only append messages we haven't rendered yet, never wipe the box.
+  msgs.forEach(m => {
+    const k = chatKey(m);
+    if (!knownChatKeys.has(k)){
+      knownChatKeys.add(k);
+      box.insertAdjacentHTML('beforeend', `<div class="chat-msg"><span class="nick">${m.nickname}</span>${m.message}</div>`);
+    }
+  });
   box.scrollTop = box.scrollHeight;
 }
 
@@ -394,9 +419,12 @@ function sendChat(){
   const msg = input.value.trim();
   if (!msg) return;
   if (!nickname){ document.getElementById('nickStatus').textContent="Set a nickname before chatting."; document.getElementById('nickStatus').className="status-msg err"; return; }
-  postAction({action:"chat", round: currentCycle, nickname, message: msg});
+  const ts = Date.now();
+  postAction({action:"chat", round: currentCycle, nickname, message: msg, timestamp: ts});
+  const localMsg = {nickname, message: msg, timestamp: ts};
+  knownChatKeys.add(chatKey(localMsg));
   const box = document.getElementById('chatMsgs');
-  box.innerHTML += `<div class="chat-msg"><span class="nick">${nickname}</span>${msg}</div>`;
+  box.insertAdjacentHTML('beforeend', `<div class="chat-msg"><span class="nick">${nickname}</span>${msg}</div>`);
   box.scrollTop = box.scrollHeight;
   input.value = "";
 }
