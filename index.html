@@ -52,7 +52,17 @@
   .collect-result{font-size:13px;color:var(--text-dim);text-align:center;min-height:18px;}
   .index-panel{display:none;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px;width:100%;}
   .index-item{font-size:12px;padding:7px 10px;border-radius:6px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-faint);}
-  .index-item.got{color:var(--gold);border-color:var(--gold);background:rgba(245,180,0,0.08);}
+  .index-item.got.common{color:var(--text-dim);border-color:var(--border-strong);}
+  .index-item.got.rare{color:#4EA1FF;border-color:#4EA1FF;background:rgba(78,161,255,0.08);}
+  .index-item.got.epic{color:#B26EFF;border-color:#B26EFF;background:rgba(178,110,255,0.08);}
+  .index-item.got.mythic{color:#FF6EC7;border-color:#FF6EC7;background:rgba(255,110,199,0.08);}
+  .index-item.got.legendary{color:var(--gold);border-color:var(--gold);background:rgba(245,180,0,0.1);font-weight:600;}
+  .rarity-tag{font-size:10px;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;padding:1px 6px;border-radius:8px;margin-right:4px;}
+  .rarity-tag.common{color:var(--text-dim);background:var(--surface-2);}
+  .rarity-tag.rare{color:#4EA1FF;background:rgba(78,161,255,0.12);}
+  .rarity-tag.epic{color:#B26EFF;background:rgba(178,110,255,0.12);}
+  .rarity-tag.mythic{color:#FF6EC7;background:rgba(255,110,199,0.12);}
+  .rarity-tag.legendary{color:var(--gold);background:rgba(245,180,0,0.15);}
 
   .countdown-wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;padding:10px 0;}
   .countdown{font-family:'IBM Plex Mono',monospace;font-size:38px;font-weight:600;color:var(--gold);}
@@ -115,6 +125,7 @@
 
   <div id="phasePanel" class="panel">
     <div class="phase-badge" id="phaseBadge">—</div>
+    <div class="countdown-wrap" id="revealCountdownWrap" style="display:none;"><div class="countdown small mono" id="revealCountdown">--</div><div class="countdown-label">until next round</div></div>
     <div id="phaseBody"></div>
   </div>
 
@@ -182,8 +193,12 @@ function fmtPrice(v){
 }
 
 async function getPrice(symbol){
-  const url = "https://api.twelvedata.com/price?symbol=" + encodeURIComponent(symbol) + "&apikey=" + API_KEY;
-  const res = await fetch(url);
+  // Cache-buster (_=timestamp) plus cache:"no-store" — without these, the
+  // browser can serve the exact same cached response for the starting-price
+  // and final-price calls since the URL is otherwise identical, making it
+  // look like the price never moved even when it did.
+  const url = "https://api.twelvedata.com/price?symbol=" + encodeURIComponent(symbol) + "&apikey=" + API_KEY + "&_=" + Date.now();
+  const res = await fetch(url, { cache: "no-store" });
   const data = await res.json();
   const p = parseFloat(data.price);
   if (isNaN(p)) throw new Error("no price");
@@ -258,12 +273,15 @@ function renderPhase(){
   const body = document.getElementById('phaseBody');
   const chatPanel = document.getElementById('chatPanel');
   const top3Panel = document.getElementById('top3Panel');
+  const revealCountdownWrap = document.getElementById('revealCountdownWrap');
   chatPanel.style.display = currentPhase === 'waiting' ? 'block' : 'none';
   top3Panel.style.display = currentPhase === 'reveal' ? 'block' : 'none';
+  revealCountdownWrap.style.display = currentPhase === 'reveal' ? 'flex' : 'none';
 
   if (currentPhase === 'intermission'){
     badge.textContent = "Intermission";
-    body.innerHTML = `<div class="spectator-note">Next round starts soon. Hit "Join round" above to play this one.</div>`;
+    body.innerHTML = `<div class="spectator-note">Next round starts soon. Hit "Join round" above to play this one.</div>
+      <div class="countdown-wrap"><div class="countdown small mono" id="intermissionCountdown">--</div><div class="countdown-label">until round starts</div></div>`;
   } else if (currentPhase === 'preround'){
     badge.textContent = "Get ready";
     body.innerHTML = `
@@ -275,7 +293,8 @@ function renderPhase(){
   } else if (currentPhase === 'confirm'){
     if (!hasJoined){
       badge.textContent = "Round in progress";
-      body.innerHTML = `<div class="spectator-note">You're spectating this round. Join the next one during intermission.</div>`;
+      body.innerHTML = `<div class="spectator-note">You're spectating this round. Join the next one during intermission.</div>
+        <div class="countdown-wrap"><div class="countdown small mono" id="confirmCountdown">--</div><div class="countdown-label">until predictions lock</div></div>`;
     } else {
       badge.textContent = "Confirm your prediction";
       body.innerHTML = `
@@ -288,7 +307,8 @@ function renderPhase(){
           <input type="text" id="predictInput" placeholder="e.g. ${fmtPrice(startPrice)}" style="width:200px;">
           <button class="primary" id="confirmBtn">Lock it in</button>
         </div>
-        <div class="status-msg" id="confirmStatus"></div>`;
+        <div class="status-msg" id="confirmStatus"></div>
+        <div class="countdown-wrap"><div class="countdown small mono" id="confirmCountdown">--</div><div class="countdown-label">until predictions lock</div></div>`;
       document.getElementById('confirmBtn').addEventListener('click', onConfirmPrediction);
     }
   } else if (currentPhase === 'waiting'){
@@ -383,13 +403,44 @@ async function doReveal(){
 }
 
 const SPIN_RESULTS = [
-  "🚀 To the moon!", "💀 Absolutely rekt", "🐻 Bear market energy", "🐂 Bull run incoming",
-  "🎯 Nailed it (probably not)", "🔮 The chart knows all", "🍀 Feeling lucky",
-  "📉 Buy the dip?", "💎 Diamond hands", "🎲 Pure chaos", "🧙 Market wizard mode activated",
-  "🦄 Unicorn gains", "🐌 Slow and steady", "🌪️ Volatility incoming", "🥶 Ice cold call",
-  "🐸 Frog on a lilypad, unbothered", "🎩 It's giving hedge fund", "🍕 Just here for the vibes",
-  "🧠 200 IQ trade", "🙈 Didn't even look at the chart"
+  { text: "💀 Absolutely rekt", rarity: "common" },
+  { text: "🐻 Bear market energy", rarity: "common" },
+  { text: "🐂 Bull run incoming", rarity: "common" },
+  { text: "🎯 Nailed it (probably not)", rarity: "common" },
+  { text: "🍀 Feeling lucky", rarity: "common" },
+  { text: "📉 Buy the dip?", rarity: "common" },
+  { text: "🎲 Pure chaos", rarity: "common" },
+  { text: "🐌 Slow and steady", rarity: "common" },
+  { text: "🍕 Just here for the vibes", rarity: "common" },
+  { text: "🔮 The chart knows all", rarity: "rare" },
+  { text: "💎 Diamond hands", rarity: "rare" },
+  { text: "🌪️ Volatility incoming", rarity: "rare" },
+  { text: "🥶 Ice cold call", rarity: "rare" },
+  { text: "🐸 Frog on a lilypad, unbothered", rarity: "rare" },
+  { text: "🚀 To the moon!", rarity: "epic" },
+  { text: "🧙 Market wizard mode activated", rarity: "epic" },
+  { text: "🎩 It's giving hedge fund", rarity: "epic" },
+  { text: "🧠 200 IQ trade", rarity: "epic" },
+  { text: "🦄 Unicorn gains", rarity: "mythic" },
+  { text: "🙈 Didn't even look at the chart", rarity: "legendary" }
 ];
+// Tier odds — deliberately weighted so common/rare dominate and legendary is
+// a genuine rare pull. Drawing from the FULL pool every time (not just
+// uncollected items) means duplicates are possible even before you've
+// caught everything — that's intentional now, not a bug.
+const TIER_WEIGHTS = { common: 50, rare: 27, epic: 15, mythic: 6, legendary: 2 };
+
+function drawPhrase(){
+  const total = Object.values(TIER_WEIGHTS).reduce((a,b) => a+b, 0);
+  let r = Math.random() * total;
+  let chosenTier = "common";
+  for (const [tier, w] of Object.entries(TIER_WEIGHTS)){
+    if (r < w){ chosenTier = tier; break; }
+    r -= w;
+  }
+  const pool = SPIN_RESULTS.filter(p => p.rarity === chosenTier);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 // Persists for the whole session (not reset between rounds) — the point is
 // collecting all of them over time, so a per-round reset would defeat it.
 let collectedPhrases = new Set();
@@ -403,8 +454,10 @@ function renderIndexPanel(){
   const panel = document.getElementById('indexPanel');
   if (!panel) return;
   panel.innerHTML = SPIN_RESULTS.map(p => {
-    const got = collectedPhrases.has(p);
-    return `<div class="index-item ${got ? 'got' : 'locked'}">${got ? p : '🔒 ???'}</div>`;
+    const got = collectedPhrases.has(p.text);
+    return `<div class="index-item ${got ? 'got ' + p.rarity : 'locked'}">
+      <span class="rarity-tag ${p.rarity}">${p.rarity}</span> ${got ? p.text : '🔒 ???'}
+    </div>`;
   }).join('');
 }
 
@@ -441,12 +494,10 @@ function startCatchGame(){
       clearTimeout(missTimer);
       target.style.display = 'none';
       target.onclick = null;
-      const uncollected = SPIN_RESULTS.filter(p => !collectedPhrases.has(p));
-      const pool = uncollected.length ? uncollected : SPIN_RESULTS;
-      const phrase = pool[Math.floor(Math.random() * pool.length)];
-      const isNew = !collectedPhrases.has(phrase);
-      collectedPhrases.add(phrase);
-      resultEl.textContent = (isNew ? "New — " : "Already had — ") + phrase;
+      const phrase = drawPhrase();
+      const isNew = !collectedPhrases.has(phrase.text);
+      collectedPhrases.add(phrase.text);
+      resultEl.innerHTML = `<span class="rarity-tag ${phrase.rarity}">${phrase.rarity}</span> ${isNew ? "New — " : "Already had — "}${phrase.text}`;
       renderCollectProgress();
       const panel = document.getElementById('indexPanel');
       if (panel && panel.style.display !== 'none') renderIndexPanel();
@@ -533,15 +584,27 @@ async function tick(){
     try{ startPrice = await getPrice(roundAsset.key); renderPhase(); }catch(e){}
   }
 
+  if (phase === 'intermission'){
+    const el = document.getElementById('intermissionCountdown');
+    if (el) el.textContent = Math.max(0, BOUNDS.intermission[1]-t).toFixed(0) + "s";
+  }
   if (phase === 'preround'){
     const el = document.getElementById('preCountdown');
     if (el) el.textContent = Math.max(0, BOUNDS.preround[1]-t).toFixed(0) + "s";
+  }
+  if (phase === 'confirm'){
+    const el = document.getElementById('confirmCountdown');
+    if (el) el.textContent = Math.max(0, BOUNDS.confirm[1]-t).toFixed(0) + "s";
   }
   if (phase === 'waiting'){
     const remaining = Math.max(0, BOUNDS.waiting[1]-t);
     const el = document.getElementById('waitCountdown');
     if (el){ const m=Math.floor(remaining/60).toString().padStart(2,'0'), s=Math.floor(remaining%60).toString().padStart(2,'0'); el.textContent = m+":"+s; }
     if (Math.floor(t) % 5 === 0 && Math.floor(t) !== chatPolledAt){ chatPolledAt = Math.floor(t); loadChat(); }
+  }
+  if (phase === 'reveal'){
+    const el = document.getElementById('revealCountdown');
+    if (el) el.textContent = Math.max(0, BOUNDS.reveal[1]-t).toFixed(0) + "s";
   }
 }
 
