@@ -45,8 +45,11 @@
   .reveal-arrow.up{color:var(--up);}
   .reveal-arrow.down{color:var(--down);}
 
-  .spin-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 0 4px;border-top:1px solid var(--border);margin-top:12px;}
-  .spin-result{font-size:15px;color:var(--gold);min-height:20px;text-align:center;}
+  .collect-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 0 4px;border-top:1px solid var(--border);margin-top:12px;}
+  .collect-progress{font-size:12px;color:var(--text-dim);}
+  .catch-row{display:flex;align-items:center;gap:14px;}
+  .catch-target{font-size:15px;font-weight:600;color:var(--gold);background:rgba(245,180,0,0.12);border:1px solid var(--gold);border-radius:20px;padding:6px 16px;cursor:pointer;}
+  .collect-result{font-size:13px;color:var(--text-dim);text-align:center;min-height:18px;}
 
   .countdown-wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;padding:10px 0;}
   .countdown{font-family:'IBM Plex Mono',monospace;font-size:38px;font-weight:600;color:var(--gold);}
@@ -294,11 +297,15 @@ function renderPhase(){
       </div>
       ${hasJoined && submitted ? `<p class="desc">Your call: <span class="mono">${fmtPrice(predictedPrice)}</span></p>` : `<p class="desc">You're spectating — no prediction locked in for this round.</p>`}
       <div class="countdown-wrap"><div class="countdown mono" id="waitCountdown">--:--</div><div class="countdown-label">until reveal</div></div>
-      <div class="spin-wrap">
-        <div class="spin-result mono" id="spinResult">🎰 spin for nothing in particular</div>
-        <button class="ghost" id="spinBtn">Spin</button>
+      <div class="collect-wrap">
+        <div class="collect-progress mono" id="collectProgress">Collected: ${collectedPhrases.size} / ${SPIN_RESULTS.length}</div>
+        <div class="catch-row">
+          <button class="ghost" id="catchStartBtn">Try to catch it</button>
+          <span class="catch-target" id="catchTarget" style="display:none;">🎯 Catch!</span>
+        </div>
+        <div class="collect-result mono" id="collectResult">Click "Try to catch it," then tap the target the instant it appears.</div>
       </div>`;
-    document.getElementById('spinBtn').addEventListener('click', doSpin);
+    document.getElementById('catchStartBtn').addEventListener('click', startCatchGame);
   } else if (currentPhase === 'reveal'){
     badge.textContent = "Reveal";
     body.innerHTML = `<div class="spectator-note">Loading results…</div>`;
@@ -377,23 +384,50 @@ const SPIN_RESULTS = [
   "🐸 Frog on a lilypad, unbothered", "🎩 It's giving hedge fund", "🍕 Just here for the vibes",
   "🧠 200 IQ trade", "🙈 Didn't even look at the chart"
 ];
+// Persists for the whole session (not reset between rounds) — the point is
+// collecting all of them over time, so a per-round reset would defeat it.
+let collectedPhrases = new Set();
 
-function doSpin(){
-  const el = document.getElementById('spinResult');
-  const btn = document.getElementById('spinBtn');
-  if (!el || !btn) return;
-  btn.disabled = true;
-  let ticks = 0;
-  const totalTicks = 16;
-  const spinInterval = setInterval(() => {
-    el.textContent = SPIN_RESULTS[Math.floor(Math.random() * SPIN_RESULTS.length)];
-    ticks++;
-    if (ticks >= totalTicks){
-      clearInterval(spinInterval);
-      el.textContent = SPIN_RESULTS[Math.floor(Math.random() * SPIN_RESULTS.length)];
-      btn.disabled = false;
-    }
-  }, 70);
+function renderCollectProgress(){
+  const el = document.getElementById('collectProgress');
+  if (el) el.textContent = `Collected: ${collectedPhrases.size} / ${SPIN_RESULTS.length}`;
+}
+
+function startCatchGame(){
+  const startBtn = document.getElementById('catchStartBtn');
+  const target = document.getElementById('catchTarget');
+  const resultEl = document.getElementById('collectResult');
+  if (!startBtn || !target || !resultEl) return;
+  startBtn.disabled = true;
+  resultEl.textContent = "Wait for it…";
+  const delay = 800 + Math.random() * 2500;
+  setTimeout(() => {
+    let resolved = false;
+    target.style.display = 'inline-block';
+    const missTimer = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      target.style.display = 'none';
+      target.onclick = null;
+      resultEl.textContent = "Missed it — try again.";
+      startBtn.disabled = false;
+    }, 650);
+    target.onclick = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(missTimer);
+      target.style.display = 'none';
+      target.onclick = null;
+      const uncollected = SPIN_RESULTS.filter(p => !collectedPhrases.has(p));
+      const pool = uncollected.length ? uncollected : SPIN_RESULTS;
+      const phrase = pool[Math.floor(Math.random() * pool.length)];
+      const isNew = !collectedPhrases.has(phrase);
+      collectedPhrases.add(phrase);
+      resultEl.textContent = (isNew ? "New — " : "Already had — ") + phrase;
+      renderCollectProgress();
+      startBtn.disabled = false;
+    };
+  }, delay);
 }
 
 let knownChatKeys = new Set();
