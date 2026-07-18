@@ -40,6 +40,13 @@
   .asset-hero .sym{font-size:13px;color:var(--text-faint);margin-left:8px;}
   .asset-hero .price{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--gold);}
   .price-label{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;text-align:right;margin-bottom:2px;}
+  .reveal-prices{display:flex;align-items:center;justify-content:center;gap:22px;padding:14px 0 6px;}
+  .reveal-arrow{font-size:22px;color:var(--text-faint);}
+  .reveal-arrow.up{color:var(--up);}
+  .reveal-arrow.down{color:var(--down);}
+
+  .spin-wrap{display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 0 4px;border-top:1px solid var(--border);margin-top:12px;}
+  .spin-result{font-size:15px;color:var(--gold);min-height:20px;text-align:center;}
 
   .countdown-wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;padding:10px 0;}
   .countdown{font-family:'IBM Plex Mono',monospace;font-size:38px;font-weight:600;color:var(--gold);}
@@ -148,7 +155,7 @@ const ASSETS = [
 ];
 
 const CYCLE = 360;
-const BOUNDS = { intermission:[0,20], preround:[20,30], confirm:[30,50], waiting:[50,350], reveal:[350,360] };
+const BOUNDS = { intermission:[0,40], preround:[40,50], confirm:[50,70], waiting:[70,330], reveal:[330,360] };
 
 let nickname = "";
 let hasJoined = false;
@@ -286,7 +293,12 @@ function renderPhase(){
         <div><div class="price-label">Starting price</div><div class="price mono" id="livePrice">${fmtPrice(startPrice)}</div></div>
       </div>
       ${hasJoined && submitted ? `<p class="desc">Your call: <span class="mono">${fmtPrice(predictedPrice)}</span></p>` : `<p class="desc">You're spectating — no prediction locked in for this round.</p>`}
-      <div class="countdown-wrap"><div class="countdown mono" id="waitCountdown">--:--</div><div class="countdown-label">until reveal</div></div>`;
+      <div class="countdown-wrap"><div class="countdown mono" id="waitCountdown">--:--</div><div class="countdown-label">until reveal</div></div>
+      <div class="spin-wrap">
+        <div class="spin-result mono" id="spinResult">🎰 spin for nothing in particular</div>
+        <button class="ghost" id="spinBtn">Spin</button>
+      </div>`;
+    document.getElementById('spinBtn').addEventListener('click', doSpin);
   } else if (currentPhase === 'reveal'){
     badge.textContent = "Reveal";
     body.innerHTML = `<div class="spectator-note">Loading results…</div>`;
@@ -337,10 +349,16 @@ async function doReveal(){
     box.innerHTML = scored.slice(0,3).map((g,i) => `<div class="top3-row"><div class="rank">${i+1}</div><div>${g.nickname}</div><div class="score">${g.score}</div></div>`).join("");
   }
 
+  const moved = (finalPrice != null && startPrice != null) ? (finalPrice - startPrice) : null;
+  const movedClass = moved == null ? "" : (moved > 0 ? "up" : (moved < 0 ? "down" : ""));
   document.getElementById('phaseBody').innerHTML = `
     <div class="asset-hero">
       <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-      <div class="price mono">${fmtPrice(finalPrice)}</div>
+    </div>
+    <div class="reveal-prices">
+      <div><div class="price-label">Starting price</div><div class="price mono">${fmtPrice(startPrice)}</div></div>
+      <div class="reveal-arrow ${movedClass}">→</div>
+      <div><div class="price-label">Final price</div><div class="price mono">${fmtPrice(finalPrice)}</div></div>
     </div>`;
 
   if (hasJoined && submitted && finalPrice != null && nickname){
@@ -349,6 +367,33 @@ async function doReveal(){
     postAction({action:"submit_score", nickname, score: myScore});
     setTimeout(loadLeaderboard, 1500);
   }
+}
+
+const SPIN_RESULTS = [
+  "🚀 To the moon!", "💀 Absolutely rekt", "🐻 Bear market energy", "🐂 Bull run incoming",
+  "🎯 Nailed it (probably not)", "🔮 The chart knows all", "🍀 Feeling lucky",
+  "📉 Buy the dip?", "💎 Diamond hands", "🎲 Pure chaos", "🧙 Market wizard mode activated",
+  "🦄 Unicorn gains", "🐌 Slow and steady", "🌪️ Volatility incoming", "🥶 Ice cold call",
+  "🐸 Frog on a lilypad, unbothered", "🎩 It's giving hedge fund", "🍕 Just here for the vibes",
+  "🧠 200 IQ trade", "🙈 Didn't even look at the chart"
+];
+
+function doSpin(){
+  const el = document.getElementById('spinResult');
+  const btn = document.getElementById('spinBtn');
+  if (!el || !btn) return;
+  btn.disabled = true;
+  let ticks = 0;
+  const totalTicks = 16;
+  const spinInterval = setInterval(() => {
+    el.textContent = SPIN_RESULTS[Math.floor(Math.random() * SPIN_RESULTS.length)];
+    ticks++;
+    if (ticks >= totalTicks){
+      clearInterval(spinInterval);
+      el.textContent = SPIN_RESULTS[Math.floor(Math.random() * SPIN_RESULTS.length)];
+      btn.disabled = false;
+    }
+  }, 70);
 }
 
 let knownChatKeys = new Set();
