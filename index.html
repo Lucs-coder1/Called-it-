@@ -39,6 +39,7 @@
   .asset-hero .name{font-size:20px;font-weight:600;}
   .asset-hero .sym{font-size:13px;color:var(--text-faint);margin-left:8px;}
   .asset-hero .price{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--gold);}
+  .price-label{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.5px;text-align:right;margin-bottom:2px;}
 
   .countdown-wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;padding:10px 0;}
   .countdown{font-family:'IBM Plex Mono',monospace;font-size:38px;font-weight:600;color:var(--gold);}
@@ -255,7 +256,7 @@ function renderPhase(){
     body.innerHTML = `
       <div class="asset-hero">
         <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-        <div class="price mono">${fmtPrice(startPrice)}</div>
+        <div><div class="price-label">Starting price</div><div class="price mono">${fmtPrice(startPrice)}</div></div>
       </div>
       <div class="countdown-wrap"><div class="countdown small mono" id="preCountdown">--</div><div class="countdown-label">until predictions open</div></div>`;
   } else if (currentPhase === 'confirm'){
@@ -267,7 +268,7 @@ function renderPhase(){
       body.innerHTML = `
         <div class="asset-hero">
           <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-          <div class="price mono">${fmtPrice(startPrice)}</div>
+          <div><div class="price-label">Starting price</div><div class="price mono">${fmtPrice(startPrice)}</div></div>
         </div>
         <p class="desc">Where will the price be in 5 minutes?</p>
         <div class="row">
@@ -282,7 +283,7 @@ function renderPhase(){
     body.innerHTML = `
       <div class="asset-hero">
         <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-        <div class="price mono" id="livePrice">${fmtPrice(startPrice)}</div>
+        <div><div class="price-label">Starting price</div><div class="price mono" id="livePrice">${fmtPrice(startPrice)}</div></div>
       </div>
       ${hasJoined && submitted ? `<p class="desc">Your call: <span class="mono">${fmtPrice(predictedPrice)}</span></p>` : `<p class="desc">You're spectating — no prediction locked in for this round.</p>`}
       <div class="countdown-wrap"><div class="countdown mono" id="waitCountdown">--:--</div><div class="countdown-label">until reveal</div></div>`;
@@ -436,7 +437,6 @@ async function tick(){
     const remaining = Math.max(0, BOUNDS.waiting[1]-t);
     const el = document.getElementById('waitCountdown');
     if (el){ const m=Math.floor(remaining/60).toString().padStart(2,'0'), s=Math.floor(remaining%60).toString().padStart(2,'0'); el.textContent = m+":"+s; }
-    if (Math.floor(t) % 30 === 0){ const lp=document.getElementById('livePrice'); if(lp) getPrice(roundAsset.key).then(p=>lp.textContent=fmtPrice(p)).catch(()=>{}); }
     if (Math.floor(t) % 5 === 0 && Math.floor(t) !== chatPolledAt){ chatPolledAt = Math.floor(t); loadChat(); }
   }
 }
