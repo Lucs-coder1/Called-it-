@@ -1,487 +1,89 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CALLED IT!</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#0A0D10; --surface:#12161A; --surface-2:#171C21;
-    --border:#232930; --border-strong:#323A43;
-    --text:#E7EAEE; --text-dim:#7C8792; --text-faint:#4E5760;
-    --up:#16E0A0; --down:#FF5568; --gold:#F5B400;
+// CALLED IT! backend — paste this into your Apps Script project (script.google.com)
+// It uses a Google Sheet as storage. Create three tabs in your bound spreadsheet:
+//   "Leaderboard" with columns: nickname | score
+//   "Guesses"     with columns: round | nickname | symbol | predictedPrice
+//   "Chat"        with columns: round | nickname | message | timestamp
+// Deploy > New deployment > Web app > Execute as "Me" > Who has access "Anyone".
+
+function doGet(e) {
+  const action = e.parameter.action;
+  let result;
+  if (action === "round_guesses") result = getGuesses(e.parameter.round);
+  else if (action === "chat") result = getChat(e.parameter.round);
+  else result = getLeaderboard(e.parameter.limit || 10);
+
+  // GitHub Pages (a real external origin) can't read a plain CORS response
+  // from Apps Script's /exec endpoint reliably. JSONP sidesteps this: the
+  // client loads this as a <script> tag instead of fetch(), which isn't
+  // subject to CORS. If the client sent a "callback" param, wrap the JSON
+  // in that function call and serve it as JavaScript, not JSON.
+  const callback = e.parameter.callback;
+  if (callback) {
+    return ContentService
+      .createTextOutput(callback + "(" + JSON.stringify(result) + ")")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;}
-  body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;min-height:100vh;}
-  .wrap{max-width:920px;margin:0 auto;padding:24px 20px 60px;}
-  .mono{font-family:'IBM Plex Mono',monospace;}
-
-  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
-  .brand{display:flex;align-items:baseline;gap:10px;}
-  .brand h1{font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:24px;letter-spacing:-0.5px;margin:0;}
-  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--up);box-shadow:0 0 0 3px rgba(22,224,160,0.15);}
-  .brand .tag{color:var(--text-dim);font-size:12px;}
-  .menu-btn{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;padding:9px 18px;border-radius:6px;border:1px solid var(--border-strong);cursor:pointer;transition:all .12s ease;}
-  .menu-btn.joinable{background:rgba(22,224,160,0.12);border-color:var(--up);color:var(--up);}
-  .menu-btn.locked{background:var(--surface-2);border-color:var(--border);color:var(--text-faint);cursor:not-allowed;}
-
-  .ticker-outer{background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:18px;position:relative;}
-  .ticker-outer::before,.ticker-outer::after{content:"";position:absolute;top:0;bottom:0;width:36px;z-index:2;pointer-events:none;}
-  .ticker-outer::before{left:0;background:linear-gradient(90deg,var(--surface),transparent);}
-  .ticker-outer::after{right:0;background:linear-gradient(-90deg,var(--surface),transparent);}
-  .ticker-track{display:flex;white-space:nowrap;padding:10px 0;animation:scroll 28s linear infinite;}
-  @keyframes scroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
-  .ticker-item{display:inline-flex;align-items:center;gap:8px;padding:0 20px;font-size:13px;color:var(--text-dim);border-right:1px solid var(--border);}
-  .ticker-item .sym{color:var(--text);font-weight:600;}
-  .ticker-item .chg.up{color:var(--up);}
-  .ticker-item .chg.down{color:var(--down);}
-
-  .panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;}
-  .panel h2{font-size:14px;font-weight:600;margin:0 0 4px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-dim);}
-  .panel .desc{font-size:13px;color:var(--text-dim);margin:0 0 14px;}
-
-  .phase-badge{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;background:rgba(245,180,0,0.12);color:var(--gold);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px;}
-
-  .asset-hero{display:flex;align-items:baseline;justify-content:space-between;padding:10px 0;}
-  .asset-hero .name{font-size:20px;font-weight:600;}
-  .asset-hero .sym{font-size:13px;color:var(--text-faint);margin-left:8px;}
-  .asset-hero .price{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--gold);}
-
-  .countdown-wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;padding:10px 0;}
-  .countdown{font-family:'IBM Plex Mono',monospace;font-size:38px;font-weight:600;color:var(--gold);}
-  .countdown-label{font-size:12px;color:var(--text-dim);margin-top:2px;}
-  .countdown.small{font-size:24px;}
-
-  input[type=text]{background:var(--surface-2);border:1px solid var(--border-strong);color:var(--text);border-radius:6px;padding:9px 12px;font-family:'IBM Plex Mono',monospace;font-size:14px;outline:none;}
-  input[type=text]:focus{border-color:var(--gold);}
-  input[type=text]::placeholder{color:var(--text-faint);}
-
-  button.primary{background:var(--gold);color:#1A1300;border:none;font-weight:600;font-size:14px;padding:11px 22px;border-radius:6px;cursor:pointer;}
-  button.primary:hover{filter:brightness(1.08);}
-  button.primary:disabled{background:var(--border-strong);color:var(--text-faint);cursor:not-allowed;}
-  button.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--border-strong);font-size:13px;padding:9px 16px;border-radius:6px;cursor:pointer;}
-  button.ghost:hover{color:var(--text);border-color:var(--text-dim);}
-
-  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
-  .status-msg{font-size:12px;color:var(--text-faint);margin-top:8px;}
-  .status-msg.err{color:var(--down);}
-  .status-msg.ok{color:var(--up);}
-
-  .top3-row{display:grid;grid-template-columns:32px 1fr 90px;gap:10px;align-items:center;padding:9px 4px;border-bottom:1px solid var(--border);font-size:13px;}
-  .top3-row:last-child{border-bottom:none;}
-  .top3-row .rank{color:var(--text-faint);font-family:'IBM Plex Mono',monospace;}
-  .top3-row .score{text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--gold);}
-
-  .lb-row{display:grid;grid-template-columns:32px 1fr 80px;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);font-size:13px;}
-  .lb-row:last-child{border-bottom:none;}
-  .lb-row .rank{color:var(--text-faint);font-family:'IBM Plex Mono',monospace;}
-  .lb-row .score{text-align:right;font-family:'IBM Plex Mono',monospace;color:var(--gold);}
-  .lb-row.me{background:rgba(245,180,0,0.06);}
-
-  .chat-box{border:1px solid var(--border);border-radius:8px;background:var(--surface-2);}
-  .chat-msgs{height:180px;overflow-y:auto;padding:10px 12px;font-size:13px;}
-  .chat-msg{margin-bottom:6px;line-height:1.4;}
-  .chat-msg .nick{color:var(--gold);font-weight:600;margin-right:6px;}
-  .chat-form{display:flex;gap:8px;border-top:1px solid var(--border);padding:10px;}
-  .chat-form input{flex:1;}
-
-  .spectator-note{font-size:13px;color:var(--text-faint);padding:14px 0;text-align:center;}
-</style>
-</head>
-<body>
-<div class="wrap">
-
-  <div class="topbar">
-    <div class="brand"><span class="dot"></span><h1>CALLED IT!</h1><span class="tag mono">live market call game</span></div>
-    <button class="menu-btn" id="menuBtn">Round started</button>
-  </div>
-
-  <div class="ticker-outer"><div class="ticker-track" id="tickerTrack"></div></div>
-
-  <div id="nickPanel" class="panel">
-    <h2>Your nickname</h2>
-    <p class="desc">Set this once — it's how you show up in chat, this round's top 3, and the leaderboard.</p>
-    <div class="row">
-      <input type="text" id="nickInput" placeholder="Nickname" maxlength="18" style="width:200px;">
-      <button class="primary" id="saveNickBtn">Save</button>
-    </div>
-    <div class="status-msg" id="nickStatus"></div>
-  </div>
-
-  <div id="phasePanel" class="panel">
-    <div class="phase-badge" id="phaseBadge">—</div>
-    <div id="phaseBody"></div>
-  </div>
-
-  <div class="panel" id="chatPanel" style="display:none;">
-    <h2>Chat</h2>
-    <p class="desc">Kill the wait. Talk trash, talk strategy.</p>
-    <div class="chat-box">
-      <div class="chat-msgs" id="chatMsgs"></div>
-      <div class="chat-form">
-        <input type="text" id="chatInput" placeholder="Say something" maxlength="140">
-        <button class="ghost" id="chatSendBtn">Send</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="panel" id="top3Panel" style="display:none;">
-    <h2>This round's closest calls</h2>
-    <p class="desc">Lowest score wins — closest guess to the real price.</p>
-    <div id="top3Box"></div>
-  </div>
-
-  <div class="panel">
-    <h2>Leaderboard</h2>
-    <p class="desc">Cumulative, lowest total score at the top.</p>
-    <div id="leaderboardBox"><div class="status-msg">Loading leaderboard…</div></div>
-    <div class="row" style="margin-top:12px;"><button class="ghost" id="refreshLbBtn">Refresh</button></div>
-  </div>
-
-</div>
-
-<script>
-const API_KEY = "a4186d53ffa648628bd8fc57444f66c7";
-const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby9ScixzSTUA5E3VWbuBr1uuufU1d-5nYb0zB-Bo5FQv-4mpqb6olmT-K0_T3fLt7P0Dw/exec";
-// URL unchanged from previous version — same deployment.
-
-const ASSETS = [
-  {key:"BTC/EUR", name:"Bitcoin", sym:"BTC/EUR"},
-  {key:"NTDOY",   name:"Nintendo", sym:"NTDOY"},
-  {key:"AAPL",    name:"Apple", sym:"AAPL"},
-  {key:"TSLA",    name:"Tesla", sym:"TSLA"},
-  {key:"MSFT",    name:"Microsoft", sym:"MSFT"},
-  {key:"NKE",     name:"Nike", sym:"NKE"},
-  {key:"EUR/USD", name:"Euro vs dollar", sym:"EUR/USD"}
-];
-
-const CYCLE = 360;
-const BOUNDS = { intermission:[0,20], preround:[20,30], confirm:[30,50], waiting:[50,350], reveal:[350,360] };
-
-let nickname = "";
-let hasJoined = false;
-let currentCycle = -1;
-let currentPhase = "";
-let roundAsset = null;
-let startPrice = null;
-let predictedPrice = null;
-let submitted = false;
-let lastTickerPrices = {};
-let chatPolledAt = 0;
-let localLeaderboard = [];
-
-function fmtPrice(v){
-  if (v === undefined || v === null || isNaN(v)) return "--";
-  if (v >= 100) return v.toFixed(2);
-  if (v >= 1) return v.toFixed(3);
-  return v.toFixed(5);
+  return jsonOut(result);
 }
 
-async function getPrice(symbol){
-  const url = "https://api.twelvedata.com/price?symbol=" + encodeURIComponent(symbol) + "&apikey=" + API_KEY;
-  const res = await fetch(url);
-  const data = await res.json();
-  const p = parseFloat(data.price);
-  if (isNaN(p)) throw new Error("no price");
-  return p;
-}
-
-async function fetchAllPrices(){
-  const entries = await Promise.all(ASSETS.map(async a => {
-    try{ return [a.key, await getPrice(a.key)]; }catch(e){ return [a.key, null]; }
-  }));
-  return Object.fromEntries(entries);
-}
-
-function renderTicker(prices){
-  const track = document.getElementById('tickerTrack');
-  const items = ASSETS.map(a => {
-    const p = prices[a.key], prev = lastTickerPrices[a.key];
-    let chgClass="",arrow="";
-    if (p!=null && prev!=null){ if(p>prev){chgClass="up";arrow="▲";} else if(p<prev){chgClass="down";arrow="▼";} }
-    return `<span class="ticker-item mono"><span class="sym">${a.sym}</span><span>${fmtPrice(p)}</span><span class="chg ${chgClass}">${arrow}</span></span>`;
-  }).join("");
-  track.innerHTML = items + items;
-  lastTickerPrices = {...prices};
-}
-
-async function refreshTicker(){ try{ renderTicker(await fetchAllPrices()); }catch(e){} }
-
-function getCycleInfo(){
-  const now = Date.now()/1000;
-  const cycleIndex = Math.floor(now / CYCLE);
-  const t = now - cycleIndex*CYCLE;
-  let phase = "reveal";
-  for (const [name,[lo,hi]] of Object.entries(BOUNDS)){ if (t>=lo && t<hi){ phase=name; break; } }
-  return {cycleIndex, t, phase};
-}
-
-document.getElementById('saveNickBtn').addEventListener('click', () => {
-  const v = document.getElementById('nickInput').value.trim();
-  const statusEl = document.getElementById('nickStatus');
-  if (!v){ statusEl.textContent="Enter a nickname first."; statusEl.className="status-msg err"; return; }
-  nickname = v;
-  statusEl.textContent = "Saved. You're set as " + nickname + ".";
-  statusEl.className = "status-msg ok";
-});
-
-document.getElementById('menuBtn').addEventListener('click', () => {
-  if (currentPhase !== 'intermission') return;
-  if (!nickname){ document.getElementById('nickStatus').textContent="Set a nickname before joining."; document.getElementById('nickStatus').className="status-msg err"; return; }
-  hasJoined = true;
-  renderMenuBtn();
-});
-
-function renderMenuBtn(){
-  const btn = document.getElementById('menuBtn');
-  if (currentPhase === 'intermission'){
-    btn.className = 'menu-btn joinable';
-    btn.textContent = hasJoined ? "Joined — waiting for round" : "Join round";
-  } else {
-    btn.className = 'menu-btn locked';
-    btn.textContent = "Round started";
+function doPost(e) {
+  const body = JSON.parse(e.postData.contents);
+  if (body.action === "guess") {
+    addGuess(body.round, body.nickname, body.symbol, body.predictedPrice);
+  } else if (body.action === "chat") {
+    addChat(body.round, body.nickname, body.message, body.timestamp);
+  } else if (body.action === "submit_score" || (body.nickname && body.score !== undefined)) {
+    addScore(body.nickname, body.score);
   }
+  // Client sends this POST with mode:"no-cors", so it never reads this
+  // response body — it's opaque to the browser either way. Still return
+  // something in case a same-origin caller (e.g. testing from the Apps
+  // Script editor) wants it.
+  return jsonOut({ ok: true });
 }
 
-async function postAction(payload){
-  try{
-    // mode:"no-cors" avoids the Apps Script CORS block. We don't read the
-    // response (it comes back opaque) — these are fire-and-forget writes.
-    await fetch(WEB_APP_URL, { method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain;charset=utf-8"}, body: JSON.stringify(payload) });
-    return true;
-  }catch(e){ return null; }
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-function jsonp(url, params){
-  return new Promise((resolve, reject) => {
-    const cbName = "jsonp_cb_" + Math.random().toString(36).slice(2);
-    const script = document.createElement('script');
-    const timeout = setTimeout(() => { cleanup(); reject(new Error("jsonp timeout")); }, 8000);
-    function cleanup(){ delete window[cbName]; script.remove(); clearTimeout(timeout); }
-    window[cbName] = (data) => { cleanup(); resolve(data); };
-    script.src = url + "?" + new URLSearchParams({...params, callback: cbName}).toString();
-    script.onerror = () => { cleanup(); reject(new Error("jsonp load error")); };
-    document.head.appendChild(script);
-  });
-}
-async function getAction(params){
-  // Apps Script GET responses don't carry CORS headers reliably from a real
-  // external origin, so we fetch via JSONP (a <script> tag) instead of fetch().
-  try{ return await jsonp(WEB_APP_URL, params); }catch(e){ return null; }
+function sheet(name) {
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
 }
 
-function renderPhase(){
-  const badge = document.getElementById('phaseBadge');
-  const body = document.getElementById('phaseBody');
-  const chatPanel = document.getElementById('chatPanel');
-  const top3Panel = document.getElementById('top3Panel');
-  chatPanel.style.display = currentPhase === 'waiting' ? 'block' : 'none';
-  top3Panel.style.display = currentPhase === 'reveal' ? 'block' : 'none';
-
-  if (currentPhase === 'intermission'){
-    badge.textContent = "Intermission";
-    body.innerHTML = `<div class="spectator-note">Next round starts soon. Hit "Join round" above to play this one.</div>`;
-  } else if (currentPhase === 'preround'){
-    badge.textContent = "Get ready";
-    body.innerHTML = `
-      <div class="asset-hero">
-        <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-        <div class="price mono">${fmtPrice(startPrice)}</div>
-      </div>
-      <div class="countdown-wrap"><div class="countdown small mono" id="preCountdown">--</div><div class="countdown-label">until predictions open</div></div>`;
-  } else if (currentPhase === 'confirm'){
-    if (!hasJoined){
-      badge.textContent = "Round in progress";
-      body.innerHTML = `<div class="spectator-note">You're spectating this round. Join the next one during intermission.</div>`;
-    } else {
-      badge.textContent = "Confirm your prediction";
-      body.innerHTML = `
-        <div class="asset-hero">
-          <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-          <div class="price mono">${fmtPrice(startPrice)}</div>
-        </div>
-        <p class="desc">Where will the price be in 5 minutes?</p>
-        <div class="row">
-          <input type="text" id="predictInput" placeholder="e.g. ${fmtPrice(startPrice)}" style="width:200px;">
-          <button class="primary" id="confirmBtn">Lock it in</button>
-        </div>
-        <div class="status-msg" id="confirmStatus"></div>`;
-      document.getElementById('confirmBtn').addEventListener('click', onConfirmPrediction);
-    }
-  } else if (currentPhase === 'waiting'){
-    badge.textContent = "Round live";
-    body.innerHTML = `
-      <div class="asset-hero">
-        <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-        <div class="price mono" id="livePrice">${fmtPrice(startPrice)}</div>
-      </div>
-      ${hasJoined && submitted ? `<p class="desc">Your call: <span class="mono">${fmtPrice(predictedPrice)}</span></p>` : `<p class="desc">You're spectating — no prediction locked in for this round.</p>`}
-      <div class="countdown-wrap"><div class="countdown mono" id="waitCountdown">--:--</div><div class="countdown-label">until reveal</div></div>`;
-  } else if (currentPhase === 'reveal'){
-    badge.textContent = "Reveal";
-    body.innerHTML = `<div class="spectator-note">Loading results…</div>`;
-    doReveal();
-  }
+function addScore(nickname, score) {
+  sheet("Leaderboard").appendRow([nickname, score]);
 }
 
-function onConfirmPrediction(){
-  const input = document.getElementById('predictInput');
-  const statusEl = document.getElementById('confirmStatus');
-  const v = parseFloat(input.value);
-  if (isNaN(v)){ statusEl.textContent="Enter a price."; statusEl.className="status-msg err"; return; }
-  predictedPrice = v;
-  submitted = true;
-  statusEl.textContent = "Locked in at " + fmtPrice(v) + ".";
-  statusEl.className = "status-msg ok";
-  input.disabled = true;
-  document.getElementById('confirmBtn').disabled = true;
-  postAction({action:"guess", round: currentCycle, nickname, symbol: roundAsset.key, predictedPrice: v});
+function getLeaderboard(limit) {
+  const rows = sheet("Leaderboard").getDataRange().getValues();
+  return rows
+    .map(r => ({ nickname: r[0], score: Number(r[1]) }))
+    // Drops any header row (e.g. a literal "Nickname"/"Score" row left over
+    // from an earlier sheet setup) since its score can't parse as a number,
+    // plus any row missing a nickname.
+    .filter(r => r.nickname && !isNaN(r.score))
+    .sort((a, b) => a.score - b.score)
+    .slice(0, Number(limit) || 10);
 }
 
-async function onEnterPhase(phase){
-  if (phase === 'waiting'){
-    document.getElementById('chatMsgs').innerHTML = "";
-    knownChatKeys = new Set();
-    chatPolledAt = 0;
-    loadChat();
-  }
-  renderMenuBtn();
-  renderPhase();
+function addGuess(round, nickname, symbol, predictedPrice) {
+  sheet("Guesses").appendRow([round, nickname, symbol, predictedPrice]);
 }
 
-async function doReveal(){
-  let finalPrice = null;
-  try{ finalPrice = await getPrice(roundAsset.key); }catch(e){}
-  renderTicker({...lastTickerPrices, [roundAsset.key]: finalPrice});
-
-  let guesses = await getAction({action:"round_guesses", round: currentCycle});
-  if (!Array.isArray(guesses)) guesses = [];
-  const scored = guesses.filter(g => g && g.nickname).map(g => ({
-    nickname: g.nickname,
-    score: (finalPrice != null) ? Math.round(Math.abs(finalPrice - parseFloat(g.predictedPrice)) * 10 * 100) / 100 : null
-  })).filter(g => g.score != null).sort((a,b) => a.score - b.score);
-
-  const box = document.getElementById('top3Box');
-  if (scored.length === 0){
-    box.innerHTML = `<div class="status-msg">No one locked in a call this round.</div>`;
-  } else {
-    box.innerHTML = scored.slice(0,3).map((g,i) => `<div class="top3-row"><div class="rank">${i+1}</div><div>${g.nickname}</div><div class="score">${g.score}</div></div>`).join("");
-  }
-
-  document.getElementById('phaseBody').innerHTML = `
-    <div class="asset-hero">
-      <div><span class="name">${roundAsset.name}</span><span class="sym mono">${roundAsset.sym}</span></div>
-      <div class="price mono">${fmtPrice(finalPrice)}</div>
-    </div>`;
-
-  if (hasJoined && submitted && finalPrice != null && nickname){
-    const myScore = Math.round(Math.abs(finalPrice - predictedPrice) * 10 * 100) / 100;
-    document.getElementById('phaseBody').innerHTML += `<p class="desc">Your score this round: <span class="mono" style="color:var(--gold);">${myScore}</span></p>`;
-    postAction({action:"submit_score", nickname, score: myScore});
-    setTimeout(loadLeaderboard, 1500);
-  }
+function getGuesses(round) {
+  const rows = sheet("Guesses").getDataRange().getValues();
+  return rows.filter(r => String(r[0]) === String(round) && !isNaN(Number(r[3])))
+    .map(r => ({ round: r[0], nickname: r[1], symbol: r[2], predictedPrice: r[3] }));
 }
 
-let knownChatKeys = new Set();
-function chatKey(m){ return m.timestamp + "|" + m.nickname + "|" + m.message; }
-
-async function loadChat(){
-  const data = await getAction({action:"chat", round: currentCycle});
-  const msgs = Array.isArray(data) ? data : [];
-  const box = document.getElementById('chatMsgs');
-  if (!box) return;
-  // Merge: only append messages we haven't rendered yet, never wipe the box.
-  msgs.forEach(m => {
-    const k = chatKey(m);
-    if (!knownChatKeys.has(k)){
-      knownChatKeys.add(k);
-      box.insertAdjacentHTML('beforeend', `<div class="chat-msg"><span class="nick">${m.nickname}</span>${m.message}</div>`);
-    }
-  });
-  box.scrollTop = box.scrollHeight;
+function addChat(round, nickname, message, timestamp) {
+  sheet("Chat").appendRow([round, nickname, message, timestamp || Date.now()]);
 }
 
-document.getElementById('chatSendBtn').addEventListener('click', sendChat);
-document.getElementById('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
-function sendChat(){
-  const input = document.getElementById('chatInput');
-  const msg = input.value.trim();
-  if (!msg) return;
-  if (!nickname){ document.getElementById('nickStatus').textContent="Set a nickname before chatting."; document.getElementById('nickStatus').className="status-msg err"; return; }
-  const ts = Date.now();
-  postAction({action:"chat", round: currentCycle, nickname, message: msg, timestamp: ts});
-  const localMsg = {nickname, message: msg, timestamp: ts};
-  knownChatKeys.add(chatKey(localMsg));
-  const box = document.getElementById('chatMsgs');
-  box.insertAdjacentHTML('beforeend', `<div class="chat-msg"><span class="nick">${nickname}</span>${msg}</div>`);
-  box.scrollTop = box.scrollHeight;
-  input.value = "";
+function getChat(round) {
+  const rows = sheet("Chat").getDataRange().getValues();
+  return rows.filter(r => String(r[0]) === String(round) && !isNaN(Number(r[3])))
+    .map(r => ({ round: r[0], nickname: r[1], message: r[2], timestamp: r[3] }))
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .slice(-50);
 }
-
-function rankPlayers(players){ return [...players].sort((a,b) => a.score - b.score); }
-function renderLeaderboard(players){
-  const box = document.getElementById('leaderboardBox');
-  const ranked = rankPlayers(players);
-  if (ranked.length === 0){ box.innerHTML = `<div class="status-msg">No scores yet.</div>`; return; }
-  box.innerHTML = ranked.slice(0,10).map((p,i) => `<div class="lb-row ${p.nickname===nickname?'me':''}"><div class="rank">${i+1}</div><div>${p.nickname}</div><div class="score">${p.score}</div></div>`).join("");
-}
-async function loadLeaderboard(){
-  const data = await getAction({action:"leaderboard", limit:10});
-  const players = Array.isArray(data) ? data : (data && (data.leaderboard || data.data)) || [];
-  if (players.length === 0 && localLeaderboard.length){ renderLeaderboard(localLeaderboard); }
-  else { renderLeaderboard(players); }
-}
-document.getElementById('refreshLbBtn').addEventListener('click', loadLeaderboard);
-
-async function tick(){
-  const {cycleIndex, t, phase} = getCycleInfo();
-  const cycleChanged = cycleIndex !== currentCycle;
-
-  if (cycleChanged){
-    // A new 6-minute cycle has started (or this is the very first tick after
-    // page load, possibly landing mid-cycle if the page was opened while a
-    // round was already in progress). Either way, pin down which asset this
-    // cycle belongs to right away — this used to only happen on entering
-    // "intermission", so loading the page mid-round left roundAsset unset.
-    currentCycle = cycleIndex;
-    roundAsset = ASSETS[cycleIndex % ASSETS.length];
-    hasJoined = false; submitted = false; predictedPrice = null; startPrice = null;
-  }
-
-  if (cycleChanged || phase !== currentPhase){
-    currentPhase = phase;
-    await onEnterPhase(phase);
-  }
-
-  // Backfill: if we're past the "preround" moment but never actually caught
-  // that transition (e.g. joined mid-round), fetch the starting price now
-  // instead of leaving it null forever.
-  if (startPrice === null && phase !== 'intermission' && roundAsset){
-    try{ startPrice = await getPrice(roundAsset.key); renderPhase(); }catch(e){}
-  }
-
-  if (phase === 'preround'){
-    const el = document.getElementById('preCountdown');
-    if (el) el.textContent = Math.max(0, BOUNDS.preround[1]-t).toFixed(0) + "s";
-  }
-  if (phase === 'waiting'){
-    const remaining = Math.max(0, BOUNDS.waiting[1]-t);
-    const el = document.getElementById('waitCountdown');
-    if (el){ const m=Math.floor(remaining/60).toString().padStart(2,'0'), s=Math.floor(remaining%60).toString().padStart(2,'0'); el.textContent = m+":"+s; }
-    if (Math.floor(t) % 30 === 0){ refreshTicker(); const lp=document.getElementById('livePrice'); if(lp) getPrice(roundAsset.key).then(p=>lp.textContent=fmtPrice(p)).catch(()=>{}); }
-    if (Math.floor(t) % 5 === 0 && Math.floor(t) !== chatPolledAt){ chatPolledAt = Math.floor(t); loadChat(); }
-  }
-}
-
-refreshTicker();
-loadLeaderboard();
-tick();
-setInterval(tick, 1000);
-setInterval(refreshTicker, 60000);
-</script>
-</body>
-</html>
