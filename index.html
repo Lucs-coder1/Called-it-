@@ -343,13 +343,6 @@ function onConfirmPrediction(){
 }
 
 async function onEnterPhase(phase){
-  if (phase === 'intermission'){
-    hasJoined = false; submitted = false; predictedPrice = null;
-    roundAsset = ASSETS[currentCycle % ASSETS.length];
-  }
-  if (phase === 'preround'){
-    try{ startPrice = await getPrice(roundAsset.key); }catch(e){ startPrice = null; }
-  }
   if (phase === 'waiting'){
     document.getElementById('chatMsgs').innerHTML = "";
     knownChatKeys = new Set();
@@ -446,13 +439,29 @@ document.getElementById('refreshLbBtn').addEventListener('click', loadLeaderboar
 
 async function tick(){
   const {cycleIndex, t, phase} = getCycleInfo();
-  if (cycleIndex !== currentCycle){
+  const cycleChanged = cycleIndex !== currentCycle;
+
+  if (cycleChanged){
+    // A new 6-minute cycle has started (or this is the very first tick after
+    // page load, possibly landing mid-cycle if the page was opened while a
+    // round was already in progress). Either way, pin down which asset this
+    // cycle belongs to right away — this used to only happen on entering
+    // "intermission", so loading the page mid-round left roundAsset unset.
     currentCycle = cycleIndex;
+    roundAsset = ASSETS[cycleIndex % ASSETS.length];
+    hasJoined = false; submitted = false; predictedPrice = null; startPrice = null;
+  }
+
+  if (cycleChanged || phase !== currentPhase){
     currentPhase = phase;
     await onEnterPhase(phase);
-  } else if (phase !== currentPhase){
-    currentPhase = phase;
-    await onEnterPhase(phase);
+  }
+
+  // Backfill: if we're past the "preround" moment but never actually caught
+  // that transition (e.g. joined mid-round), fetch the starting price now
+  // instead of leaving it null forever.
+  if (startPrice === null && phase !== 'intermission' && roundAsset){
+    try{ startPrice = await getPrice(roundAsset.key); renderPhase(); }catch(e){}
   }
 
   if (phase === 'preround'){
