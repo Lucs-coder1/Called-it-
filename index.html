@@ -50,6 +50,9 @@
   .catch-row{display:flex;align-items:center;gap:14px;}
   .catch-target{font-size:15px;font-weight:600;color:var(--gold);background:rgba(245,180,0,0.12);border:1px solid var(--gold);border-radius:20px;padding:6px 16px;cursor:pointer;}
   .collect-result{font-size:13px;color:var(--text-dim);text-align:center;min-height:18px;}
+  .index-panel{display:none;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px;width:100%;}
+  .index-item{font-size:12px;padding:7px 10px;border-radius:6px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-faint);}
+  .index-item.got{color:var(--gold);border-color:var(--gold);background:rgba(245,180,0,0.08);}
 
   .countdown-wrap{display:flex;align-items:center;justify-content:center;flex-direction:column;padding:10px 0;}
   .countdown{font-family:'IBM Plex Mono',monospace;font-size:38px;font-weight:600;color:var(--gold);}
@@ -302,10 +305,13 @@ function renderPhase(){
         <div class="catch-row">
           <button class="ghost" id="catchStartBtn">Try to catch it</button>
           <span class="catch-target" id="catchTarget" style="display:none;">🎯 Catch!</span>
+          <button class="ghost" id="viewIndexBtn">Index</button>
         </div>
         <div class="collect-result mono" id="collectResult">Click "Try to catch it," then tap the target the instant it appears.</div>
+        <div class="index-panel" id="indexPanel" style="display:none;"></div>
       </div>`;
     document.getElementById('catchStartBtn').addEventListener('click', startCatchGame);
+    document.getElementById('viewIndexBtn').addEventListener('click', toggleIndexPanel);
   } else if (currentPhase === 'reveal'){
     badge.textContent = "Reveal";
     body.innerHTML = `<div class="spectator-note">Loading results…</div>`;
@@ -393,6 +399,23 @@ function renderCollectProgress(){
   if (el) el.textContent = `Collected: ${collectedPhrases.size} / ${SPIN_RESULTS.length}`;
 }
 
+function renderIndexPanel(){
+  const panel = document.getElementById('indexPanel');
+  if (!panel) return;
+  panel.innerHTML = SPIN_RESULTS.map(p => {
+    const got = collectedPhrases.has(p);
+    return `<div class="index-item ${got ? 'got' : 'locked'}">${got ? p : '🔒 ???'}</div>`;
+  }).join('');
+}
+
+function toggleIndexPanel(){
+  const panel = document.getElementById('indexPanel');
+  if (!panel) return;
+  const show = panel.style.display === 'none';
+  panel.style.display = show ? 'grid' : 'none';
+  if (show) renderIndexPanel();
+}
+
 function startCatchGame(){
   const startBtn = document.getElementById('catchStartBtn');
   const target = document.getElementById('catchTarget');
@@ -425,6 +448,8 @@ function startCatchGame(){
       collectedPhrases.add(phrase);
       resultEl.textContent = (isNew ? "New — " : "Already had — ") + phrase;
       renderCollectProgress();
+      const panel = document.getElementById('indexPanel');
+      if (panel && panel.style.display !== 'none') renderIndexPanel();
       startBtn.disabled = false;
     };
   }, delay);
